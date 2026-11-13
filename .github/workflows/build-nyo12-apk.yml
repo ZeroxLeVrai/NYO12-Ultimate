@@ -1,0 +1,65 @@
+name: Build NYO12 Ultimate APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Get source
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android build tools
+        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;36.0.0"
+
+      - name: Restore signing key (if configured)
+        id: signing
+        env:
+          NYO12_KEYSTORE_BASE64: ${{ secrets.NYO12_KEYSTORE_BASE64 }}
+        run: |
+          mkdir -p .build dist
+          if [ -n "$NYO12_KEYSTORE_BASE64" ]; then
+            printf '%s' "$NYO12_KEYSTORE_BASE64" | base64 --decode > .build/nyo12-debug.jks
+            echo "reused=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "reused=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build NYO12 APK
+        run: |
+          python3 scripts/repack_nyo12_from_base_apk.py \
+            --sdk "$ANDROID_HOME" \
+            --base-apk build-inputs/DroidPlay-0.6.0-arm64-v8a.apk \
+            --out dist/NYO12-Ultimate-v0.1.0.apk
+
+      - name: Export first-run signing key for safekeeping
+        if: ${{ steps.signing.outputs.reused == 'false' }}
+        run: base64 -w0 .build/nyo12-debug.jks > dist/NYO12_KEYSTORE_BASE64.txt
+
+      - name: Upload NYO12 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NYO12-Ultimate-v0.1.0-arm64
+          path: dist/NYO12-Ultimate-v0.1.0.apk
+          if-no-files-found: error
+
+      - name: Upload signing key for first run
+        if: ${{ steps.signing.outputs.reused == 'false' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: NYO12-signing-key-backup
+          path: dist/NYO12_KEYSTORE_BASE64.txt
+          if-no-files-found: error
